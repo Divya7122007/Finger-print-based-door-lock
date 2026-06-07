@@ -1,0 +1,128 @@
+Arduino Source Code
+
+
+#include <Adafruit_Fingerprint.h>
+#include <SoftwareSerial.h>
+
+// Configure serial pins for fingerprint sensor: RX (Pin 2), TX (Pin 3)
+SoftwareSerial mySerial(2, 3);
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
+
+// Hardware Pin Definitions
+const int RELAY_PIN = 4;       // Controls the electronic door lock
+const int ACCESS_LED = 5;      // Green LED (Optional)
+const int DENIED_LED = 6;      // Red LED (Optional)
+const int BUZZER_PIN = 7;      // Status buzzer (Optional)
+
+// Configuration Constants
+const int LOCK_DELAY = 4000;   // Time door stays unlocked (in milliseconds)
+
+void setup() {
+  // Initialize physical indicator pins
+  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(ACCESS_LED, OUTPUT);
+  pinMode(DENIED_LED, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  
+  // Set initial safe states (Relay OFF, LEDs OFF)
+  digitalWrite(RELAY_PIN, LOW);
+  digitalWrite(ACCESS_LED, LOW);
+  digitalWrite(DENIED_LED, LOW);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  // Initialize debug serial connection
+  Serial.begin(9600);
+  while (!Serial); 
+  delay(100);
+  Serial.println("\n\nFingerprint Door Lock System Initializing...");
+
+  // Initialize sensor data rate
+  finger.begin(57600);
+  
+  // Verify sensor connection
+  if (finger.verifyPassword()) {
+    Serial.println("Fingerprint sensor detected successfully!");
+    // Success chirp
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(100);
+    digitalWrite(BUZZER_PIN, LOW);
+  } else {
+    Serial.println("Did not find fingerprint sensor :(");
+    // Continuous alert for hardware failure
+    while (1) { 
+      digitalWrite(DENIED_LED, HIGH); 
+      delay(500); 
+      digitalWrite(DENIED_LED, LOW); 
+      delay(500); 
+    }
+  }
+
+  // Load configured user templates
+  finger.getTemplateCount();
+  Serial.print("Sensor contains "); 
+  Serial.print(finger.templateCount); 
+  Serial.println(" enrolled templates.");
+  Serial.println("Waiting for valid fingerprint...");
+}
+
+void loop() {
+  // Continuously scan for fingers on the reader module
+  getFingerprintID();
+  delay(50); // Small pause to prevent system strain
+}
+
+// Function to handle reading and checking fingerprint signatures
+int getFingerprintID() {
+  uint8_t p = finger.getImage();
+  if (p != FINGERPRINT_OK)  return -1; // No finger placed
+
+  p = finger.image2Tz();
+  if (p != FINGERPRINT_OK)  return -1; // Image conversion failed
+
+  p = finger.fingerFastSearch();
+  if (p == FINGERPRINT_OK) {
+    // Match found!
+    Serial.print("Found ID #"); Serial.print(finger.fingerID);
+    Serial.print(" with confidence of "); Serial.println(finger.confidence);
+    grantAccess();
+    return finger.fingerID;
+  } else if (p == FINGERPRINT_NOTFOUND) {
+    // Finger scanned but not in database
+    Serial.println("Access Denied. Unknown Fingerprint.");
+    denyAccess();
+    return -1;
+  } else {
+    // Other structural or operational error
+    Serial.println("Error matching fingerprint template.");
+    return -1;
+  }
+}
+
+// Helper function to handle open lock sequence
+void grantAccess() {
+  digitalWrite(ACCESS_LED, HIGH);   // Turn on success LED
+  digitalWrite(RELAY_PIN, HIGH);    // Trigger relay (Unlock door)
+  
+  // Success double-beep
+  digitalWrite(BUZZER_PIN, HIGH); delay(100); digitalWrite(BUZZER_PIN, LOW);
+  delay(50);
+  digitalWrite(BUZZER_PIN, HIGH); delay(100); digitalWrite(BUZZER_PIN, LOW);
+
+  delay(LOCK_DELAY);                // Wait for person to pass through
+
+  digitalWrite(RELAY_PIN, LOW);     // Release relay (Lock door)
+  digitalWrite(ACCESS_LED, LOW);    // Turn off success LED
+  Serial.println("Door locked again. Waiting...");
+}
+
+// Helper function to handle rejected entry sequence
+void denyAccess() {
+  digitalWrite(DENIED_LED, HIGH);   // Turn on error LED
+  
+  // Long error beep
+  digitalWrite(BUZZER_PIN, HIGH); 
+  delay(800); 
+  digitalWrite(BUZZER_PIN, LOW);
+  
+  digitalWrite(DENIED_LED, LOW);    // Turn off error LED
+}
